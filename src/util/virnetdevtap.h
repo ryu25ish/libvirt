@@ -51,6 +51,12 @@ typedef enum {
    VIR_NETDEV_TAP_CREATE_PERSIST            = 1 << 3,
 } virNetDevTapCreateFlags;
 
+int virNetDevTapCreateAsGeneric(char **ifname,
+                                int *tapfd,
+                                int tapfdSize,
+                                unsigned int flags)
+    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+
 int virNetDevTapCreateInBridgePort(const char *brname,
                                    char **ifname,
                                    const virMacAddr *macaddr,

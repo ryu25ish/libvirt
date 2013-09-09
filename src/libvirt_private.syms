@@ -1470,6 +1470,7 @@ virNetDevOpenvswitchSetMigrateData;
 
 # util/virnetdevtap.h
 virNetDevTapCreate;
+virNetDevTapCreateAsGeneric;
 virNetDevTapCreateInBridgePort;
 virNetDevTapDelete;
 virNetDevTapGetName;

@@ -333,6 +333,13 @@ qemuNetworkIfaceConnect(virDomainDefPtr def,
     } else if (actualType == VIR_DOMAIN_NET_TYPE_BRIDGE) {
         if (VIR_STRDUP(brname, virDomainNetGetActualBridgeName(net)) < 0)
             return ret;
+    } else if (actualType == VIR_DOMAIN_NET_TYPE_ETHERNET) {
+        if (STRNEQ_NULLABLE(net->script, "")) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("Network type %d with script is not supported."),
+                           virDomainNetGetActualType(net));
+            return ret;
+        }
     } else {
         virReportError(VIR_ERR_INTERNAL_ERROR,
                        _("Network type %d is not supported"),
@@ -356,13 +363,20 @@ qemuNetworkIfaceConnect(virDomainDefPtr def,
     }
 
     if (cfg->privileged) {
-        if (virNetDevTapCreateInBridgePort(brname, &net->ifname, &net->mac,
-                                           def->uuid, tapfd, *tapfdSize,
-                                           virDomainNetGetActualVirtPortProfile(net),
-                                           virDomainNetGetActualVlan(net),
-                                           tap_create_flags) < 0) {
-            virDomainAuditNetDevice(def, net, "/dev/net/tun", false);
-            goto cleanup;
+        if (actualType == VIR_DOMAIN_NET_TYPE_ETHERNET) {
+            if (virNetDevTapCreateAsGeneric(&net->ifname, tapfd, *tapfdSize,
+                                            tap_create_flags) < 0) {
+                virDomainAuditNetDevice(def, net, "/dev/net/tun", false);
+                goto cleanup;
+            }
+        } else {
+            if (virNetDevTapCreateInBridgePort
+                (brname, &net->ifname, &net->mac, def->uuid, tapfd,
+                 *tapfdSize, virDomainNetGetActualVirtPortProfile(net),
+                 virDomainNetGetActualVlan(net), tap_create_flags) < 0) {
+                virDomainAuditNetDevice(def, net, "/dev/net/tun", false);
+                goto cleanup;
+            }
         }
     } else {
         if (qemuCreateInBridgePortWithHelper(cfg, brname,
@@ -5080,16 +5094,30 @@ qemuBuildHostNetStr(virDomainNetDefPtr net,
         break;
 
     case VIR_DOMAIN_NET_TYPE_ETHERNET:
-        virBufferAddLit(&buf, "tap");
-        if (net->ifname) {
-            virBufferAsprintf(&buf, "%cifname=%s", type_sep, net->ifname);
-            type_sep = ',';
+        if (tapfdSize > 0) {
+            virBufferAsprintf(&buf, "tap%c", type_sep);
+            if (tapfdSize == 1) {
+                virBufferAsprintf(&buf, "fd=%s", tapfd[0]);
+            } else {
+                virBufferAddLit(&buf, "fds=");
+                for (i = 0; i < tapfdSize; i++) {
+                    if (i)
+                        virBufferAddChar(&buf, ':');
+                    virBufferAdd(&buf, tapfd[i], -1);
+                }
+            }
+        } else {
+            virBufferAddLit(&buf, "tap");
+            if (net->ifname) {
+                virBufferAsprintf(&buf, "%cifname=%s", type_sep, net->ifname);
+            }
+
+            if (net->script) {
+                virBufferAsprintf(&buf, "%cscript=%s", type_sep,
+                                  net->script);
+            }
         }
-        if (net->script) {
-            virBufferAsprintf(&buf, "%cscript=%s", type_sep,
-                              net->script);
-            type_sep = ',';
-        }
+        type_sep = ',';
         is_tap = true;
         break;
 
@@ -7468,7 +7496,9 @@ qemuBuildInterfaceCommandLine(virCommandPtr cmd,
     }
 
     if (actualType == VIR_DOMAIN_NET_TYPE_NETWORK ||
-        actualType == VIR_DOMAIN_NET_TYPE_BRIDGE) {
+        actualType == VIR_DOMAIN_NET_TYPE_BRIDGE ||
+        (actualType == VIR_DOMAIN_NET_TYPE_ETHERNET &&
+         STREQ_NULLABLE(net->script, ""))) {
         tapfdSize = net->driver.virtio.queues;
         if (!tapfdSize)
             tapfdSize = 1;

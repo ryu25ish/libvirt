@@ -405,6 +405,50 @@ int virNetDevTapDelete(const char *ifname ATTRIBUTE_UNUSED)
 
 
 /**
+ * virNetDevTapCreateAsGeneric:
+ * @ifname: the interface name (or name template)
+ * @tapfd: array of file descriptor return value for the new tap device
+ * @tapfdSize: number of file descriptors in @tapfd
+ * @flags: OR of virNetDevTapCreateFlags:
+ *
+ *   VIR_NETDEV_TAP_CREATE_IFUP
+ *     - Bring the interface up
+ *   VIR_NETDEV_TAP_CREATE_PERSIST
+ *     - The device will persist after the file descriptor is closed
+ *
+ * This function creates a new tap device.  @ifname can be either a fixed name
+ * or a name template with '%d' for dynamic name allocation.  In either case,
+ * the final name for the interface will be stored in @ifname.  If @tapfd
+ * parameter is supplied, the open tap device file descriptor will be
+ * returned.  Otherwise the TAP device will be closed. The caller must use
+ * virNetDevTapDelete to remove a persistent TAP device when it is no longer
+ * needed.
+ *
+ * Returns 0 in case of success or -1 on failure
+ */
+int virNetDevTapCreateAsGeneric(char** ifname,
+                                int *tapfd,
+                                int tapfdSize,
+                                unsigned int flags)
+{
+    size_t i;
+    if (virNetDevTapCreate(ifname, tapfd, tapfdSize, flags) < 0)
+        return -1;
+
+    if (virNetDevSetOnline(*ifname, !!(flags & VIR_NETDEV_TAP_CREATE_IFUP)) < 0)
+        goto error;
+
+    return 0;
+
+error:
+    for (i = 0; i < tapfdSize && tapfd[i] >= 0; i++)
+        VIR_FORCE_CLOSE(tapfd[i]);
+
+    return -1;
+}
+
+
+/**
  * virNetDevTapCreateInBridgePort:
  * @brname: the bridge name
  * @ifname: the interface name (or name template)
